@@ -3,7 +3,7 @@ import os
 import sys
 from ctypes import *
 
-class KDC101Controller:
+class KDC101_Rotation:
     def __init__(self, serial_num: str):
         """
         Initialize the KDC101 controller with the given serial number.
@@ -37,20 +37,13 @@ class KDC101Controller:
         """
         Connect to the KDC101 device.
         """
-        # if self.lib.TLI_BuildDeviceList() == 0:
-        #     self.lib.CC_Open(self.serial_num)
-        #     self.lib.CC_StartPolling(self.serial_num, c_int(200))
-        #     print("Device connected and polling started.")
-        # else:
-        #     raise ConnectionError("Failed to build device list.")
-
         self.build_device_list()
         self.lib.CC_Open(self.serial_num)
         self.lib.CC_StartPolling(self.serial_num, c_int(200))
         print("Device connected.")
     
     def wait_for_message(self, expected_id):
-        msg_type, msg_id, msg_data = c_ushort(), c_ushort(), c_uint()
+        msg_type, msg_id, msg_data = c_ushort(), c_ushort(), c_ulong()
         while True:
             self.lib.CC_WaitForMessage(self.serial_num, byref(msg_type), byref(msg_id), byref(msg_data))
             
@@ -69,7 +62,6 @@ class KDC101Controller:
         self.clear_message_queue()
         self.lib.CC_Home(self.serial_num)
         self.wait_for_message(expected_id=0)
-        
         print("Device homed.")
     
     def set_motor_params(self, steps_per_rev=1919.64186, gbox_ratio=1.0, pitch=1.0):
@@ -82,8 +74,8 @@ class KDC101Controller:
     def get_position(self):
         """
         Get the current position of the device in real units.
-        
         """
+        print('Getting position...')
         time.sleep(0.25)
         self.clear_message_queue()
         self.lib.CC_RequestPosition(self.serial_num)
@@ -92,13 +84,13 @@ class KDC101Controller:
 
         real_pos = c_double()
         self.lib.CC_GetRealValueFromDeviceUnit(self.serial_num, dev_pos, byref(real_pos), 0)
-        print(f"Current Position: {real_pos.value} mm")
+        print(f"Current Position: {real_pos.value} \u00b0")
         return real_pos.value
     
     def move_absolute(self, target_position):
         """
         Move the device to an absolute position.
-        :param target_position: The target position in real units (mm).
+        :param target_position: The target position in real units (\u00b0).
         """
         time.sleep(0.25)
         self.clear_message_queue()
@@ -110,14 +102,48 @@ class KDC101Controller:
         self.lib.CC_SetMoveAbsolutePosition(self.serial_num, new_pos_dev)
         time.sleep(0.25)
         self.lib.CC_MoveAbsolute(self.serial_num)
-        print(f"Moving to {target_position} mm.")
+        print(f"Moving to {target_position} \u00b0.")
         self.wait_for_message(expected_id=1)
 
+    def move_relative(self, displacement):
+        """
+        Move relative to previous position in real units.
+        """
+        disp_real = c_double(displacement)
+        disp_dev = c_int()
+        self.lib.CC_GetDeviceUnitFromRealValue(self.serial_num, disp_real, byref(disp_dev), 0)
+        
+        self.lib.CC_MoveRelative(self.serial_num, disp_dev)
+        print(f"Moving relatively by {displacement}\u00b0.")
+
+    def move_jog(self, direction):
+        """
+        Move jogging, 2 for going forward and 1 for going backwards. 
+        """
+        self.lib.CC_SetJogMode(self.serial_num, c_short(2), c_short(1))
+
+        #self.lib.CC_GetJogMode(self.serial_num,c_short(2),c_short(1) )
+        if direction not in [1, 2]:
+            raise ValueError("Invalid jog direction. Use 2 for forwards or 1 for backwards.")
+        
+        self.lib.CC_MoveJog(self.serial_num, c_short( direction))
+        print(f"Jogging in direction: {'Backwards' if direction == 1 else 'Forward'}.")
+
+    def set_jog_step_size(self, step_size):
+        new_jog_step_real = c_double(step_size)
+        new_jog_step_dev = c_uint()
+        self.lib.CC_GetDeviceUnitFromRealValue(self.serial_num, new_jog_step_real, byref(new_jog_step_dev), 0)
+        self.lib.CC_SetJogStepSize(self.serial_num, new_jog_step_dev)
+        print(f"Jog step size set to {step_size}\u00b0.")
+
+
     def get_velocity(self):
-        current_velocity, current_acceleration = c_int32(), c_int32()
-        self.lib.CC_GetVelParams(self.serial_num, byref(current_acceleration), byref(current_velocity))
-        print(f"Current velocity: {current_velocity.value} device units/s")
-        return current_velocity.value
+        velocity_dev, acceleration_dev = c_int32(), c_int32()
+        self.lib.CC_GetVelParams(self.serial_num, byref(acceleration_dev), byref(velocity_dev))
+        velocity_real, acceleration_real = c_int(), c_int()
+        self.lib.CC_GetRealValueFromDeviceUnit(self.serial_num,velocity_dev, velocity_real, c_int(1))
+        print(f"Current velocity: {velocity_real.value}\u00b0/s")
+        return velocity_real.value
     
     
     def set_velocity(self, velocity):
@@ -128,7 +154,6 @@ class KDC101Controller:
             self.lib.CC_GetVelParams(self.serial_num, byref(current_acceleration), byref(current_velocity))
             self.lib.CC_SetVelParams(self.serial_num, current_acceleration, c_int(velocity))
             print(f"Velocity set to {velocity}.")
-    
 
     
     def disconnect(self):
@@ -141,15 +166,14 @@ class KDC101Controller:
     
 if __name__ == "__main__":
 
-    controller =KDC101Controller("27257212")
+    controller = KDC101_Rotation("27257212")
     controller.connect()
     controller.home()
     controller.set_motor_params()
     controller.get_position()
     controller.get_velocity()
     controller.move_absolute(5.0)
-    controller.get_position()
-    controller.move_absolute(10.0)
-    controller.get_position()
-    controller.disconnect()
+
+    
+    #controller.disconnect()
 
