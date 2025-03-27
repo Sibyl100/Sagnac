@@ -71,21 +71,7 @@ class KDC101_Rotation:
         self.lib.CC_SetMotorParamsExt(self.serial_num, c_double(steps_per_rev), c_double(gbox_ratio), c_double(pitch))
         print("Motor parameters set.")
     
-    def get_position(self):
-        """
-        Get the current position of the device in real units.
-        """
-        print('Getting position...')
-        time.sleep(0.25)
-        self.clear_message_queue()
-        self.lib.CC_RequestPosition(self.serial_num)
-        
-        dev_pos = c_int(self.lib.CC_GetPosition(self.serial_num))
-
-        real_pos = c_double()
-        self.lib.CC_GetRealValueFromDeviceUnit(self.serial_num, dev_pos, byref(real_pos), 0)
-        print(f"Current Position: {real_pos.value} \u00b0")
-        return real_pos.value
+    
     
     def move_absolute(self, target_position):
         """
@@ -115,18 +101,31 @@ class KDC101_Rotation:
         
         self.lib.CC_MoveRelative(self.serial_num, disp_dev)
         print(f"Moving relatively by {displacement}\u00b0.")
+        self.wait_for_message(expected_id=1)
+        #print("Current position: {} \u00b0".format(self.position))
+
+    def set_jog_mode(self):
+        self.lib.CC_SetJogMode(self.serial_num, c_short(2), c_short(1))
+        v_real = c_int(15)
+        v_dev_u = c_int()
+        self.lib.CC_GetDeviceUnitFromRealValue(self.serial_num, v_real, byref(v_dev_u), 0)
+        
+        self.lib.CC_SetJogVelParams(self.serial_num,v_dev_u,v_dev_u)
+        self.set_jog_step_size(3)
 
     def move_jog(self, direction):
         """
         Move jogging, 2 for going forward and 1 for going backwards. 
         """
-        self.lib.CC_SetJogMode(self.serial_num, c_short(2), c_short(1))
+        #self.lib.CC_SetJogMode(self.serial_num, c_short(2), c_short(1))
 
         #self.lib.CC_GetJogMode(self.serial_num,c_short(2),c_short(1) )
         if direction not in [1, 2]:
             raise ValueError("Invalid jog direction. Use 2 for forwards or 1 for backwards.")
         
         self.lib.CC_MoveJog(self.serial_num, c_short( direction))
+        #sts =self.wait_for_message(1)
+        #print(sts)
         print(f"Jogging in direction: {'Backwards' if direction == 1 else 'Forward'}.")
 
     def set_jog_step_size(self, step_size):
@@ -155,6 +154,13 @@ class KDC101_Rotation:
             self.lib.CC_SetVelParams(self.serial_num, current_acceleration, c_int(velocity))
             print(f"Velocity set to {velocity}.")
 
+    def polling(self,rate):
+        """
+        Starts the internal polling loop which continuously requests position and status.
+        Specify polling rate in milliseconds. 
+        """
+
+        self.lib.CC_StartPolling(self.serial_num, c_int(rate))
     
     def disconnect(self):
         """
@@ -163,14 +169,28 @@ class KDC101_Rotation:
         self.lib.CC_StopPolling(self.serial_num)
         self.lib.CC_Close(self.serial_num)
         print("Device disconnected.")
+
+    @property
+    def position(self):
+        """
+        Get the current position of the device in real units.
+        """
+        self.lib.CC_RequestPosition(self.serial_num)
+        
+        dev_pos = c_int(self.lib.CC_GetPosition(self.serial_num))
+
+        real_pos = c_double()
+        self.lib.CC_GetRealValueFromDeviceUnit(self.serial_num, dev_pos, byref(real_pos), 0)
+        return real_pos.value
+    
     
 if __name__ == "__main__":
 
-    controller = KDC101_Rotation("27257212")
+    controller = KDC101_Rotation("27257179")
     controller.connect()
     controller.home()
     controller.set_motor_params()
-    controller.get_position()
+    controller.position
     controller.get_velocity()
     controller.move_absolute(5.0)
 
